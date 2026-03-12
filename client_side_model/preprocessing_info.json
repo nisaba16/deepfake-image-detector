@@ -1,0 +1,64 @@
+{
+  "input_shape": [
+    6,
+    224,
+    224
+  ],
+  "channels": {
+    "0": "Red (0-1)",
+    "1": "Green (0-1)",
+    "2": "Blue (0-1)",
+    "3": "Saturation (0-1)",
+    "4": "SRM Noise Filter (0-1)",
+    "5": "FFT Magnitude (0-1)"
+  },
+  "srm_kernel": [
+    [
+      -0.0625,
+      -0.0625,
+      -0.0625,
+      -0.0625,
+      -0.0625
+    ],
+    [
+      -0.0625,
+      0.125,
+      0.125,
+      0.125,
+      -0.0625
+    ],
+    [
+      -0.0625,
+      0.125,
+      0.5,
+      0.125,
+      -0.0625
+    ],
+    [
+      -0.0625,
+      0.125,
+      0.125,
+      0.125,
+      -0.0625
+    ],
+    [
+      -0.0625,
+      -0.0625,
+      -0.0625,
+      -0.0625,
+      -0.0625
+    ]
+  ],
+  "class_names": [
+    "fake",
+    "real"
+  ],
+  "model_info": {
+    "model_name": "DeepfakeMobileNetV3",
+    "input_channels": 6,
+    "num_classes": 2,
+    "total_parameters": 1091730,
+    "trainable_parameters": 1091730,
+    "model_size_mb": 4.164619445800781
+  }
+}
