@@ -138,7 +138,6 @@ def main():
             model_input=args.input,
             model_output=args.output,
             weight_type=QuantType.QInt8,
-            optimize_model=False,
         )
         in_mb  = os.path.getsize(args.input)  / 1024 ** 2
         out_mb = os.path.getsize(args.output) / 1024 ** 2
@@ -235,10 +234,6 @@ def main():
             activation_type=QuantType.QInt8,
             calibrate_method=cal_method,
             extra_options=extra_options,
-            # Disable model optimization during quantization — quant_pre_process already
-            # ran it. Doing it again here changes the graph structure, which makes
-            # debugging accuracy drops (via qdq_loss_debug) much harder.
-            optimize_model=False,
         )
         if op_types is not None:
             kwargs["op_types_to_quantize"] = op_types

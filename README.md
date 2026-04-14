@@ -495,6 +495,57 @@ python onnx_experiments/bench_accuracy.py \
     --max_samples 1000
 ```
 
+**Export on the CPU partition** (no GPU needed — calibration is CPU-bound):
+```bash
+# Single model
+sbatch --wrap="/home/infres/billy-22/miniconda3/envs/deepfake_env/bin/python \
+  onnx_experiments/export.py \
+  --model resnet50 \
+  --fp32_ckpt checkpoints/best_resnet50_fp32.pth \
+  --qat_ckpt  checkpoints/best_resnet50_qat.pth \
+  --data_dir  data/dataset \
+  --output_dir onnx_experiments/models" \
+  --job-name=export_resnet50 --partition=cpu-high --nodelist=nodecpu01 \
+  --cpus-per-task=8 --mem=16G --time=01:00:00 \
+  --output=logs/export_resnet50_%j.out
+
+sbatch --wrap="/home/infres/billy-22/miniconda3/envs/deepfake_env/bin/python \
+    onnx_experiments/export.py \
+    --model mobilenet_v3_small \
+    --fp32_ckpt checkpoints/best_mobilenet_v3_small_fp32.pth \
+    --qat_ckpt  checkpoints/best_mobilenet_v3_small_qat.pth \
+    --data_dir  data/dataset \
+    --output_dir onnx_experiments/models" \
+    --job-name=export_mobilenet --partition=cpu-high --nodelist=nodecpu01 \
+    --cpus-per-task=8 --mem=16G --time=01:00:00 \
+    --output=logs/export_mobilenet_%j.out
+
+
+sbatch --wrap="/home/infres/billy-22/miniconda3/envs/deepfake_env/bin/python \
+    onnx_experiments/export.py \
+    --model vit_b_16 \
+    --fp32_ckpt checkpoints/best_vit_b_16_fp32.pth \
+    --qat_ckpt  checkpoints/best_vit_b_16_qat.pth \
+    --data_dir  data/dataset \
+    --output_dir onnx_experiments/models" \
+    --job-name=export_vit --partition=cpu-high --nodelist=nodecpu01 \
+    --cpus-per-task=8 --mem=32G --time=02:00:00 \
+    --output=logs/export_vit_%j.out
+
+# forensic_mobilenet (needs --features)
+sbatch --wrap="/home/infres/billy-22/miniconda3/envs/deepfake_env/bin/python \
+  onnx_experiments/export.py \
+  --model forensic_mobilenet \
+  --fp32_ckpt checkpoints/best_forensic_mobilenet_rgb-hsv-fft-noise-srm_fp32.pth \
+  --qat_ckpt  checkpoints/best_forensic_mobilenet_rgb-hsv-fft-noise-srm_qat.pth \
+  --data_dir  data/dataset \
+  --output_dir onnx_experiments/models \
+  --features rgb hsv fft noise srm" \
+  --job-name=export_forensic --partition=cpu-high --nodelist=nodecpu01 \
+  --cpus-per-task=8 --mem=16G --time=01:00:00 \
+  --output=logs/export_forensic_%j.out
+```
+
 ### Run on SLURM
 
 ```bash
