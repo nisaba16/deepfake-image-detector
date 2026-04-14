@@ -164,7 +164,7 @@ def model_size_mb(path: str) -> float:
 # ---------------------------------------------------------------------------
 def run_all(
     models_dir: str,
-    data_dir: str,
+    data_dir: Optional[str],
     max_val_samples: Optional[int],
     warmup: int,
     latency_runs: int,
@@ -173,12 +173,17 @@ def run_all(
     seed: int,
     model_families: Optional[List[str]] = None,
     variants: Optional[List[str]] = None,
+    latency_only: bool = False,
 ) -> List[Dict]:
-    # Build validation split once
-    print(f"Loading dataset from {data_dir} ...")
-    paths, labels, class_to_idx, idx_to_class = collect_image_paths_and_labels(data_dir)
-    _, val_paths, _, val_labels = stratified_split(paths, labels, test_size=0.2, seed=seed)
-    print(f"  Validation set: {len(val_paths)} images | classes: {class_to_idx}")
+    # Build validation split once (skipped in latency_only mode)
+    if latency_only:
+        val_paths, val_labels = [], []
+        print("Latency-only mode: skipping dataset load and accuracy evaluation.")
+    else:
+        print(f"Loading dataset from {data_dir} ...")
+        paths, labels, class_to_idx, idx_to_class = collect_image_paths_and_labels(data_dir)
+        _, val_paths, _, val_labels = stratified_split(paths, labels, test_size=0.2, seed=seed)
+        print(f"  Validation set: {len(val_paths)} images | classes: {class_to_idx}")
 
     all_onnx = sorted(Path(models_dir).glob("*.onnx"))
 
@@ -220,10 +225,13 @@ def run_all(
             results.append({"model": name, "size_mb": size, "error": str(e)})
             continue
 
-        print(f"  Running accuracy ({max_val_samples or len(val_paths)} samples) ...")
-        acc_metrics = run_accuracy(session, val_paths, val_labels, max_val_samples)
-        print(f"  → Accuracy: {acc_metrics['accuracy']:.2f}%  "
-              f"({acc_metrics['samples']} samples)")
+        if not latency_only:
+            print(f"  Running accuracy ({max_val_samples or len(val_paths)} samples) ...")
+            acc_metrics = run_accuracy(session, val_paths, val_labels, max_val_samples)
+            print(f"  → Accuracy: {acc_metrics['accuracy']:.2f}%  "
+                  f"({acc_metrics['samples']} samples)")
+        else:
+            acc_metrics = {}
 
         print(f"  Running latency ({warmup} warm-up + {latency_runs} runs) ...")
         lat_metrics = run_latency(session, warmup=warmup, runs=latency_runs)
@@ -298,7 +306,9 @@ def main():
     parser = argparse.ArgumentParser(description="ONNX model experiments: accuracy, size, latency")
     parser.add_argument("--models_dir", default="onnx_experiments/models",
                         help="Directory containing .onnx files")
-    parser.add_argument("--data_dir", default="data/dataset")
+    parser.add_argument("--data_dir", default=None)
+    parser.add_argument("--latency_only", action="store_true",
+                        help="Skip accuracy evaluation; no --data_dir needed")
     parser.add_argument("--output", default="onnx_experiments/results.json",
                         help="Save results to JSON")
     parser.add_argument("--max_val_samples", type=int, default=None,
@@ -322,6 +332,9 @@ def main():
                              "Default: fp32 int8 (excludes qat float-sim graphs).")
     args = parser.parse_args()
 
+    if not args.latency_only and args.data_dir is None:
+        parser.error("--data_dir is required unless --latency_only is set")
+
     results = run_all(
         models_dir=args.models_dir,
         data_dir=args.data_dir,
@@ -333,6 +346,7 @@ def main():
         seed=args.seed,
         model_families=args.models,
         variants=args.variants,
+        latency_only=args.latency_only,
     )
 
     if results:
