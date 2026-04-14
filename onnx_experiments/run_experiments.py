@@ -62,21 +62,36 @@ def preprocess(img_path: str, size: int = 224) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Inference helpers
 # ---------------------------------------------------------------------------
+def _is_quantized(model_path: str) -> bool:
+    """True for _int8 and _qat variants; FP32 models stay in float in all cases."""
+    stem = Path(model_path).stem
+    return stem.endswith("_int8") or stem.endswith("_qat")
+
+
 def make_session(model_path: str, use_gpu: bool = False,
                  use_trt: bool = False, verbose: bool = False) -> ort.InferenceSession:
-    if use_trt and use_gpu:
+    quantized = _is_quantized(model_path)
+
+    if use_trt and use_gpu and quantized:
+        # TRT INT8 for PTQ (_int8) and QAT (_qat) models.
+        # Both carry QDQ nodes that encode per-channel scales — TRT reads them
+        # directly and builds a native INT8 engine without extra calibration.
         providers = [
             ("TensorrtExecutionProvider", {
                 "trt_engine_cache_enable": True,
                 "trt_engine_cache_path": ".trt_cache",
-                "trt_fp16_enable": False,   # keep FP32 accuracy for benchmarking
-                "trt_int8_enable": False,    # INT8 handled by QDQ nodes in the ONNX graph
+                "trt_fp16_enable": False,
+                "trt_int8_enable": True,
             }),
             "CUDAExecutionProvider",
             "CPUExecutionProvider",
         ]
+        print(f"  [ORT] TRT INT8 path  (quantized model: {Path(model_path).stem})")
     elif use_gpu:
+        # FP32 models (and quantized models when --trt is not set) run on CUDA EP.
         providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        if use_trt and not quantized:
+            print(f"  [ORT] TRT skipped for FP32 model — using CUDA EP in float precision")
     else:
         providers = ["CPUExecutionProvider"]
 

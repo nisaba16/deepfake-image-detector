@@ -21,10 +21,12 @@ deepfake-image-detector/
 │   ├── solution.py                    # Quantization primitives (linear_quantize, STE, …)
 │   └── utils.py                       # replace_with_quantized_modules
 ├── onnx_experiments/
-│   ├── export_to_onnx.py              # Step 1 – PyTorch → ONNX (FP32 or QAT)
-│   ├── data_reader.py                 # Calibration data reader for ORT static quant
-│   ├── quantize_onnx.py               # Step 2 – FP32 ONNX → INT8 ONNX (ORT static)
-│   └── run_experiments.py             # Step 3 – accuracy + size + latency table
+│   ├── export.py                      # Step 1 – fp32.pth + qat.pth → fp32/ptq_int8/qat_int8 ONNX
+│   ├── bench_latency.py               # Step 2 – latency table (dummy inputs, TRT INT8 for quant models)
+│   ├── bench_accuracy.py              # Step 3 – accuracy table on validation split
+│   ├── export_to_onnx.py              # (internal) PyTorch → ONNX export helpers
+│   ├── quantize_onnx.py               # (internal) ORT static quantization with NaN-safe calibration
+│   └── data_reader.py                 # (internal) calibration data reader
 ├── utils/
 │   └── data_loader.py                 # collect_image_paths_and_labels, stratified_split
 ├── checkpoints/                       # Saved PyTorch weights (.pth)
@@ -448,136 +450,102 @@ sbatch --export=MODEL=vit_b_16,PHASE=qat slurm_train_models.sh
 
 ## Phase 3 — ONNX Experiments (accuracy / size / latency)
 
-Two ONNX variants are compared per model:
+Three ONNX variants are produced per model:
 
-| Variant | Source | ONNX dtype | Real INT8 ops? |
-|---|---|---|---|
-| `{model}_fp32.onnx` | `best_{model}_fp32.pth` | float32 | no |
-| `{model}_int8.onnx` | ORT S8S8 QDQ quantization of `{model}_qat.onnx` | int8 | **yes** |
+| File | Source | Quantization |
+|---|---|---|
+| `{model}_fp32.onnx` | FP32 checkpoint | none — float32 baseline |
+| `{model}_ptq_int8.onnx` | FP32 ONNX + ORT static calibration | post-training quantization |
+| `{model}_qat_int8.onnx` | QAT checkpoint + ORT static calibration | quantization-aware training |
 
-`{model}_qat.onnx` is an intermediate artifact (float32 graph with QAT weights) used
-as input to the ORT quantizer. It is not a comparison target.
+Quantization scheme: **S8S8 QDQ** — signed INT8 weights and activations, symmetric
+(zero\_point = 0), QuantizeLinear/DequantizeLinear nodes.
+TensorRT INT8 engine is used automatically for `*_int8` models when `--trt` is set.
 
-The quantization scheme is **S8S8 QDQ**: signed INT8 for both weights and activations,
-symmetric (zero\_point = 0), using QuantizeLinear/DequantizeLinear nodes.
-INT8 latency gains require hardware with INT8 SIMD support (x86 AVX512-VNNI, ARM NEON).
+### Three focused scripts
 
-### Run the full pipeline on SLURM
+**`export.py`** — one command exports all three variants for a model:
+```bash
+python onnx_experiments/export.py \
+    --model      resnet50 \
+    --fp32_ckpt  checkpoints/best_resnet50_fp32.pth \
+    --qat_ckpt   checkpoints/best_resnet50_qat.pth \
+    --data_dir   data/dataset \
+    --output_dir onnx_experiments/models
+# → resnet50_fp32.onnx  resnet50_ptq_int8.onnx  resnet50_qat_int8.onnx
+```
+
+**`bench_latency.py`** — dummy inputs, no dataset needed:
+```bash
+python onnx_experiments/bench_latency.py \
+    --models_dir onnx_experiments/models \
+    --models     resnet50 mobilenet_v3_small \
+    --gpu --trt \
+    --runs 100 --warmup 20
+# FP32 models → CUDA EP (float)
+# *_int8 models → TensorRT INT8 engine
+```
+
+**`bench_accuracy.py`** — accuracy on the validation split:
+```bash
+python onnx_experiments/bench_accuracy.py \
+    --models_dir onnx_experiments/models \
+    --data_dir   data/dataset \
+    --models     resnet50 \
+    --max_samples 1000
+```
+
+### Run on SLURM
 
 ```bash
-# Default (all models, GPU partition)
-sbatch slurm_onnx_experiments.sh
+# First time: export all models (needs dataset for calibration ~5 min/model)
+sbatch --export=ALL,MODELS="resnet50",RUN_EXPORT=1,RUN_ACCURACY=1 slurm_onnx_experiments.sh
 
-# Single model — GPU partition (3090)
-sbatch --export=ALL,MODELS=resnet50 slurm_onnx_experiments.sh
-sbatch --export=ALL,MODELS=vit_b_16 slurm_onnx_experiments.sh
-sbatch --export=ALL,MODELS=mobilenet_v3_small slurm_onnx_experiments.sh
-sbatch --export=ALL,MODELS=forensic_mobilenet slurm_onnx_experiments.sh
+# Re-run accuracy on already-exported models (fast, no calibration)
+sbatch --export=ALL,"MODELS=resnet50 mobilenet_v3_small",RUN_ACCURACY=1 slurm_onnx_experiments.sh
 
-# Single model — CPU partition (EPYC 9274F, VNNI INT8 support), no GPU
-sbatch --partition=cpu-high --nodelist=nodecpu01 --export=ALL,MODELS=resnet50,USE_GPU=0 slurm_onnx_experiments.sh
+# GPU latency with TensorRT INT8
+sbatch --export=ALL,MODELS="resnet50",RUN_LATENCY=1,USE_GPU=1,USE_TRT=1 slurm_onnx_experiments.sh
 
-# Multiple models, custom quantization format
-sbatch --export=ALL,"MODELS=resnet50 mobilenet_v3_small vit_b_16",QUANT_FORMAT=QDQ slurm_onnx_experiments.sh
-```
-
-**Results:** `onnx_experiments/results.json` + printed table with speedup summary.
-
-### Run steps manually
-
-**Step 1 — Export to ONNX**
-```bash
-# FP32
-python onnx_experiments/export_to_onnx.py \
-    --model resnet50 \
-    --checkpoint checkpoints/best_resnet50_fp32.pth
-
-# QAT (float graph with simulated quantization baked in)
-python onnx_experiments/export_to_onnx.py \
-    --model resnet50 \
-    --checkpoint checkpoints/best_resnet50_qat.pth \
-    --qat
-```
-
-**Step 2 — ORT S8S8 QDQ quantization** (on the QAT ONNX)
-```bash
-python onnx_experiments/quantize_onnx.py \
-    --input  onnx_experiments/models/resnet50_qat.onnx \
-    --output onnx_experiments/models/resnet50_int8.onnx \
-    --data_dir data/dataset
-```
-
-**Step 3 — Compare models (accuracy + size + latency)**
-```bash
-# Single model
-python onnx_experiments/run_experiments.py \
-    --models_dir   onnx_experiments/models \
-    --data_dir     data/dataset \
-    --models       resnet50 \
-    --max_val_samples 1000 \
-    --latency_runs 100 \
-    --gpu \
-    --warmup 20 \
-    --output onnx_experiments/results.json
-
-# All models at once (omit --models)
-python onnx_experiments/run_experiments.py \
-    --models_dir   onnx_experiments/models \
-    --data_dir     data/dataset \
-    --max_val_samples 1000 \
-    --latency_runs 100 \
-    --warmup 20 \
-    --output onnx_experiments/results.json
-```
-
-Add `--gpu` to measure latency with `CUDAExecutionProvider`, or `--gpu --trt` for TensorRT EP.
-
-### Output table (example)
-
-```
-============================================================
-EXPERIMENT RESULTS
-============================================================
-Model                                          Size (MB)  Accuracy (%)   Median (ms)  Mean (ms)   P95 (ms)
-----------------------------------------------  ---------  -------------  -----------  ----------  --------
-resnet50_fp32                                      97.70        94.20          18.40       18.90      21.10
-resnet50_int8                                      24.80        93.50           9.20        9.50      11.30
-vit_b_16_fp32                                     329.60        95.10          82.30       83.10      86.70
-vit_b_16_int8                                      84.10        94.40          41.50       42.20      44.90
-
-Speedup over FP32 baseline (latency):
-  resnet50_int8     speedup=2.00x  size_reduction=74.6%  acc_drop=0.70pp
-  vit_b_16_int8     speedup=1.98x  size_reduction=74.5%  acc_drop=0.70pp
+# Full pipeline (export + latency + accuracy)
+sbatch --export=ALL,"MODELS=resnet50 mobilenet_v3_small",RUN_EXPORT=1,RUN_LATENCY=1,RUN_ACCURACY=1,USE_GPU=1,USE_TRT=1 slurm_onnx_experiments.sh
 ```
 
 ---
 
 ## Experiment Parameters Reference
 
-### `run_experiments.py`
+### `export.py`
+
+| Argument | Default | Description |
+|---|---|---|
+| `--model` | required | Model architecture |
+| `--fp32_ckpt` | required | FP32 checkpoint path |
+| `--qat_ckpt` | None | QAT checkpoint (skipped if not provided) |
+| `--data_dir` | `data/dataset` | Dataset root for PTQ/QAT calibration |
+| `--output_dir` | `onnx_experiments/models` | Where to write `.onnx` files |
+| `--num_cal_samples` | 256 | Images used for ORT static calibration |
+
+### `bench_latency.py`
 
 | Argument | Default | Description |
 |---|---|---|
 | `--models_dir` | `onnx_experiments/models` | Folder with `.onnx` files |
-| `--data_dir` | `data/dataset` | Dataset root |
-| `--models` | all | Restrict to these model families (e.g. `resnet50 vit_b_16`) |
-| `--variants` | `fp32 int8` | Which suffixes to include (e.g. `fp32 int8 qat`) |
-| `--max_val_samples` | all | Cap number of validation images |
-| `--latency_runs` | 100 | Inference iterations per model |
-| `--warmup` | 20 | Warm-up iterations (discarded) |
+| `--models` | all | Filter by model family prefix |
 | `--gpu` | off | Use `CUDAExecutionProvider` |
-| `--trt` | off | Use `TensorrtExecutionProvider` (requires `--gpu` and TensorRT) |
-| `--output` | `onnx_experiments/results.json` | JSON results path |
+| `--trt` | off | Use TensorRT INT8 for `*_int8` models (requires `--gpu`) |
+| `--runs` | 100 | Measurement iterations |
+| `--warmup` | 20 | Warm-up iterations (discarded) |
 
-### `quantize_onnx.py`
+### `bench_accuracy.py`
 
 | Argument | Default | Description |
 |---|---|---|
-| `--quant_format` | `QDQ` | `QDQ` (hardware-friendly) or `QOperator` (fused) |
-| `--per_channel` | off | Per-channel weights (more accurate, slower calibration) |
-| `--calibration_method` | `MinMax` | `MinMax`, `Entropy`, or `Percentile` |
-| `--num_calibration_samples` | 256 | Images used to calibrate activations |
-| `--no_symmetric_activation` | off | Switch from S8S8 to S8U8 (asymmetric activations) |
+| `--models_dir` | `onnx_experiments/models` | Folder with `.onnx` files |
+| `--data_dir` | required | Dataset root |
+| `--models` | all | Filter by model family prefix |
+| `--max_samples` | all | Cap number of validation images |
+| `--gpu` | off | Use GPU for faster inference throughput |
 
 ---
 
