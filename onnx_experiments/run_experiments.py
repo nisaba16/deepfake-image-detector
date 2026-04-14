@@ -63,7 +63,7 @@ def preprocess(img_path: str, size: int = 224) -> np.ndarray:
 # Inference helpers
 # ---------------------------------------------------------------------------
 def make_session(model_path: str, use_gpu: bool = False,
-                 use_trt: bool = False) -> ort.InferenceSession:
+                 use_trt: bool = False, verbose: bool = False) -> ort.InferenceSession:
     if use_trt and use_gpu:
         providers = [
             ("TensorrtExecutionProvider", {
@@ -84,13 +84,25 @@ def make_session(model_path: str, use_gpu: bool = False,
     opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     opts.intra_op_num_threads = 4
     opts.inter_op_num_threads = 1
+    if verbose:
+        # 0=VERBOSE, 1=INFO, 2=WARNING, 3=ERROR, 4=FATAL
+        # Level 1 shows per-op kernel dispatch, fallback decisions, and provider selection
+        opts.log_severity_level = 1
     session = ort.InferenceSession(model_path, sess_options=opts, providers=providers)
 
     active = session.get_providers()[0]
     print(f"  [ORT] Active provider: {active}")
+    print(f"  [ORT] All providers (priority order): {session.get_providers()}")
     if use_gpu and "CPU" in active:
         print(f"  [ORT] WARNING: requested GPU but got CPU — "
               f"check onnxruntime-gpu install and CUDA availability")
+
+    if verbose:
+        # Show which nodes got assigned to which provider
+        print(f"  [ORT] Node placement summary:")
+        for node_meta in session.get_providers():
+            print(f"    provider active: {node_meta}")
+
     return session
 
 
@@ -174,6 +186,7 @@ def run_all(
     model_families: Optional[List[str]] = None,
     variants: Optional[List[str]] = None,
     latency_only: bool = False,
+    verbose: bool = False,
 ) -> List[Dict]:
     # Build validation split once (skipped in latency_only mode)
     if latency_only:
@@ -219,7 +232,7 @@ def run_all(
         print(f"{'='*60}")
 
         try:
-            session = make_session(model_path, use_gpu=use_gpu, use_trt=use_trt)
+            session = make_session(model_path, use_gpu=use_gpu, use_trt=use_trt, verbose=verbose)
         except Exception as e:
             print(f"  [ERROR] Failed to load session: {e}")
             results.append({"model": name, "size_mb": size, "error": str(e)})
@@ -309,6 +322,10 @@ def main():
     parser.add_argument("--data_dir", default=None)
     parser.add_argument("--latency_only", action="store_true",
                         help="Skip accuracy evaluation; no --data_dir needed")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Enable ORT verbose logging (log_severity_level=1): "
+                             "shows per-op kernel dispatch, provider selection, "
+                             "and CPU fallback decisions")
     parser.add_argument("--output", default="onnx_experiments/results.json",
                         help="Save results to JSON")
     parser.add_argument("--max_val_samples", type=int, default=None,
@@ -347,6 +364,7 @@ def main():
         model_families=args.models,
         variants=args.variants,
         latency_only=args.latency_only,
+        verbose=args.verbose,
     )
 
     if results:
