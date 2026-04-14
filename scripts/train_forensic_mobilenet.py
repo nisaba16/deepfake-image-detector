@@ -160,7 +160,9 @@ def main():
     # --- Training ---
     parser.add_argument("--epochs",     type=int,   default=10)
     parser.add_argument("--batch_size", type=int,   default=32)
-    parser.add_argument("--lr",         type=float, default=1e-4)
+    parser.add_argument("--lr",           type=float, default=1e-4)
+    parser.add_argument("--weight_decay", type=float, default=1e-4,
+                        help="L2 weight decay for AdamW (default: 1e-4)")
     parser.add_argument("--scheduler",  action="store_true",
                         help="Enable CosineAnnealingLR scheduler (default: constant LR)")
     parser.add_argument("--seed",       type=int,   default=42)
@@ -271,7 +273,7 @@ def main():
     model = model.to(device)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs) if args.scheduler else None
 
     # -----------------------------------------------------------------------

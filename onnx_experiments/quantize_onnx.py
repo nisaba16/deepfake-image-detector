@@ -220,7 +220,11 @@ def main():
     # S8S8: both weights and activations are signed INT8, zero_point=0 (symmetric).
     # ActivationSymmetric=True is required — without it ORT defaults to asymmetric
     # (non-zero zero_point) even when activation_type=QInt8.
-    extra_options = {"ActivationSymmetric": symmetric_act}
+    # QuantizeBias=False: ORT quantizes biases as INT32 by default, which TensorRT
+    # rejects (IDequantizeLayer only accepts INT8/INT4/FP8/FP4, not INT32).
+    # Biases are tiny tensors — leaving them as FP32 has negligible impact on
+    # model size or accuracy while making the model TRT-compatible.
+    extra_options = {"ActivationSymmetric": symmetric_act, "QuantizeBias": False}
 
     def _run_quantize(op_types=None):
         dr.rewind()
