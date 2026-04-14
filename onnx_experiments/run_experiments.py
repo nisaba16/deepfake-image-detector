@@ -84,6 +84,11 @@ def make_session(model_path: str, use_gpu: bool = False,
     opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     opts.intra_op_num_threads = 4
     opts.inter_op_num_threads = 1
+    if use_gpu:
+        # Pre-load all constant initializers (Conv weights, biases) into GPU memory
+        # at session init rather than inserting MemcpyFromHost nodes in the runtime graph.
+        # Eliminates the "54 Memcpy nodes" warning and avoids redundant H2D copies.
+        opts.add_session_config_entry("session.use_device_allocator_for_initializers", "1")
     if verbose:
         # 0=VERBOSE, 1=INFO, 2=WARNING, 3=ERROR, 4=FATAL
         # Level 1 shows per-op kernel dispatch, fallback decisions, and provider selection
