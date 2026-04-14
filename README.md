@@ -96,7 +96,7 @@ python onnx_experiments/export_to_onnx.py \
 
 On SLURM:
 ```bash
-sbatch --export=MODEL=dinov2_vitb14,PHASE=fp32 slurm_train_models.sh
+sbatch --export=MODEL=dinov2_vitb14,PHASE=fp32,,EPOCHS=50 slurm_train_models.sh
 ```
 
 ---
@@ -145,13 +145,16 @@ python onnx_experiments/quantize_onnx.py \
 On SLURM:
 ```bash
 # FP32 training
-sbatch --export=MODEL=vit_b_16,PHASE=fp32 slurm_train_models.sh
+sbatch --export=MODEL=vit_b_16,PHASE=fp32,EPOCHS=30 slurm_train_models.sh
 
 # QAT fine-tuning (run after FP32 job completes)
 sbatch --export=MODEL=vit_b_16,PHASE=qat,EPOCHS=3 slurm_train_models.sh
 
-# ONNX export + INT8 quantization + comparison table
-sbatch --export=MODELS=vit_b_16 slurm_onnx_experiments.sh
+# ONNX export + INT8 quantization + comparison table (GPU partition)
+sbatch --export=ALL,MODELS=vit_b_16 slurm_onnx_experiments.sh
+
+# On CPU partition (EPYC 9274F, VNNI support for INT8)
+sbatch --partition=cpu-high --nodelist=nodecpu01 --export=ALL,MODELS=vit_b_16,USE_GPU=0 slurm_onnx_experiments.sh
 ```
 
 ---
@@ -199,9 +202,9 @@ python onnx_experiments/quantize_onnx.py \
 
 On SLURM:
 ```bash
-sbatch --export=MODEL=resnet50,PHASE=fp32 slurm_train_models.sh
-sbatch --export=MODEL=resnet50,PHASE=qat,EPOCHS=3 slurm_train_models.sh
-sbatch --export=MODELS=resnet50 slurm_onnx_experiments.sh
+sbatch --export=ALL,MODEL=resnet50,PHASE=fp32,EPOCHS=30 slurm_train_models.sh
+sbatch --export=ALL,MODEL=resnet50,PHASE=qat,EPOCHS=3 slurm_train_models.sh
+sbatch --export=ALL,MODELS=resnet50 slurm_onnx_experiments.sh
 ```
 
 ---
@@ -249,9 +252,9 @@ python onnx_experiments/quantize_onnx.py \
 
 On SLURM:
 ```bash
-sbatch --export=MODEL=mobilenet_v3_small,PHASE=fp32,EPOCHS=50 slurm_train_models.sh
-sbatch --export=MODEL=mobilenet_v3_small,PHASE=qat,EPOCHS=3 slurm_train_models.sh
-sbatch --export=MODELS=mobilenet_v3_small slurm_onnx_experiments.sh
+sbatch --export=ALL,MODEL=mobilenet_v3_small,PHASE=fp32,EPOCHS=30 slurm_train_models.sh
+sbatch --export=ALL,MODEL=mobilenet_v3_small,PHASE=qat,EPOCHS=3 slurm_train_models.sh
+sbatch --export=ALL,MODELS=mobilenet_v3_small slurm_onnx_experiments.sh
 ```
 
 ---
@@ -302,9 +305,9 @@ python onnx_experiments/quantize_onnx.py \
 
 On SLURM:
 ```bash
-sbatch --export=MODEL=forensic_mobilenet,PHASE=fp32,EPOCHS=50,"FEATURES=rgb hsv fft noise srm" slurm_train_models.sh
-sbatch --export=MODEL=forensic_mobilenet,PHASE=qat,EPOCHS=3,"FEATURES=rgb hsv fft noise srm" slurm_train_models.sh
-sbatch --export="MODELS=forensic_mobilenet","FEATURES=rgb hsv fft noise srm" slurm_onnx_experiments.sh
+sbatch --export=ALL,MODEL=forensic_mobilenet,PHASE=fp32,EPOCHS=50,"FEATURES=rgb hsv fft noise srm" slurm_train_models.sh
+sbatch --export=ALL,MODEL=forensic_mobilenet,PHASE=qat,EPOCHS=3,"FEATURES=rgb hsv fft noise srm" slurm_train_models.sh
+sbatch --export=ALL,MODELS=forensic_mobilenet,"FEATURES=rgb hsv fft noise srm" slurm_onnx_experiments.sh
 ```
 
 ---
@@ -327,7 +330,7 @@ relative to `_fp32` for each.
 
 On SLURM (all models at once):
 ```bash
-sbatch --export="MODELS=resnet50 vit_b_16 mobilenet_v3_small forensic_mobilenet dinov2_vitb14" \
+sbatch --export=ALL,"MODELS=resnet50 vit_b_16 mobilenet_v3_small forensic_mobilenet dinov2_vitb14" \
     slurm_onnx_experiments.sh
 ```
 
@@ -340,11 +343,12 @@ python scripts/train_fp32.py \
     --model resnet50 \
     --data_dir data/dataset \
     --epochs 10 \
-    --batch_size 32 \
-    --disable_cudnn
+    --batch_size 32
 ```
 
 **Outputs:** `checkpoints/best_{model}_fp32.pth`
+
+> If you hit cuDNN architecture mismatch errors (e.g. on older drivers), add `--disable_cudnn` as a workaround. Avoid it otherwise — it disables cuDNN optimizations and slows training.
 
 On SLURM:
 ```bash
@@ -402,14 +406,14 @@ e.g. `best_forensic_mobilenet_rgb-hsv-fft-noise-srm_fp32.pth`
 On SLURM:
 ```bash
 # All features (default)
-sbatch --export=MODEL=forensic_mobilenet slurm_train_models.sh
+sbatch --export=ALL,MODEL=forensic_mobilenet slurm_train_models.sh
 
 # Ablation: run all combinations in parallel
-sbatch --export=MODEL=forensic_mobilenet,FEATURES="rgb"                   slurm_train_models.sh
-sbatch --export=MODEL=forensic_mobilenet,FEATURES="rgb hsv"               slurm_train_models.sh
-sbatch --export=MODEL=forensic_mobilenet,FEATURES="rgb hsv fft"           slurm_train_models.sh
-sbatch --export=MODEL=forensic_mobilenet,FEATURES="rgb noise srm"         slurm_train_models.sh
-sbatch --export=MODEL=forensic_mobilenet,FEATURES="rgb hsv fft noise srm" slurm_train_models.sh
+sbatch --export=ALL,MODEL=forensic_mobilenet,FEATURES="rgb"                   slurm_train_models.sh
+sbatch --export=ALL,MODEL=forensic_mobilenet,FEATURES="rgb hsv"               slurm_train_models.sh
+sbatch --export=ALL,MODEL=forensic_mobilenet,FEATURES="rgb hsv fft"           slurm_train_models.sh
+sbatch --export=ALL,MODEL=forensic_mobilenet,FEATURES="rgb noise srm"         slurm_train_models.sh
+sbatch --export=ALL,MODEL=forensic_mobilenet,FEATURES="rgb hsv fft noise srm" slurm_train_models.sh
 ```
 
 ---
@@ -425,8 +429,7 @@ python scripts/train_qat.py \
     --data_dir data/dataset \
     --epochs 3 \
     --batch_size 32 \
-    --pretrained checkpoints/best_resnet50_fp32.pth \
-    --disable_cudnn
+    --pretrained checkpoints/best_resnet50_fp32.pth
 ```
 
 **Outputs:**
@@ -445,27 +448,37 @@ sbatch --export=MODEL=vit_b_16,PHASE=qat slurm_train_models.sh
 
 ## Phase 3 — ONNX Experiments (accuracy / size / latency)
 
-Three ONNX variants are produced per model and compared:
+Two ONNX variants are compared per model:
 
 | Variant | Source | ONNX dtype | Real INT8 ops? |
 |---|---|---|---|
 | `{model}_fp32.onnx` | `best_{model}_fp32.pth` | float32 | no |
-| `{model}_int8.onnx` | ORT static quant of FP32 ONNX | int8 | **yes** |
-| `{model}_qat.onnx` | `best_{model}_qat.pth` | float32 (simulated) | no |
+| `{model}_int8.onnx` | ORT S8S8 QDQ quantization of `{model}_qat.onnx` | int8 | **yes** |
 
+`{model}_qat.onnx` is an intermediate artifact (float32 graph with QAT weights) used
+as input to the ORT quantizer. It is not a comparison target.
+
+The quantization scheme is **S8S8 QDQ**: signed INT8 for both weights and activations,
+symmetric (zero\_point = 0), using QuantizeLinear/DequantizeLinear nodes.
 INT8 latency gains require hardware with INT8 SIMD support (x86 AVX512-VNNI, ARM NEON).
 
 ### Run the full pipeline on SLURM
 
 ```bash
-# Both resnet50 and vit_b_16 (default)
+# Default (all models, GPU partition)
 sbatch slurm_onnx_experiments.sh
 
-# Single model
-sbatch --export=MODELS=resnet50 slurm_onnx_experiments.sh
+# Single model — GPU partition (3090)
+sbatch --export=ALL,MODELS=resnet50 slurm_onnx_experiments.sh
+sbatch --export=ALL,MODELS=vit_b_16 slurm_onnx_experiments.sh
+sbatch --export=ALL,MODELS=mobilenet_v3_small slurm_onnx_experiments.sh
+sbatch --export=ALL,MODELS=forensic_mobilenet slurm_onnx_experiments.sh
 
-# Choose quantization format (QDQ recommended for GPU/accelerators)
-sbatch --export=MODELS="resnet50 vit_b_16",QUANT_FORMAT=QOperator slurm_onnx_experiments.sh
+# Single model — CPU partition (EPYC 9274F, VNNI INT8 support), no GPU
+sbatch --partition=cpu-high --nodelist=nodecpu01 --export=ALL,MODELS=resnet50,USE_GPU=0 slurm_onnx_experiments.sh
+
+# Multiple models, custom quantization format
+sbatch --export=ALL,"MODELS=resnet50 mobilenet_v3_small vit_b_16",QUANT_FORMAT=QDQ slurm_onnx_experiments.sh
 ```
 
 **Results:** `onnx_experiments/results.json` + printed table with speedup summary.
@@ -486,27 +499,38 @@ python onnx_experiments/export_to_onnx.py \
     --qat
 ```
 
-**Step 2 — ORT static INT8 quantization** (on the FP32 ONNX)
+**Step 2 — ORT S8S8 QDQ quantization** (on the QAT ONNX)
 ```bash
 python onnx_experiments/quantize_onnx.py \
-    --input  onnx_experiments/models/resnet50_fp32.onnx \
+    --input  onnx_experiments/models/resnet50_qat.onnx \
     --output onnx_experiments/models/resnet50_int8.onnx \
-    --data_dir data/dataset \
-    --quant_format QDQ
+    --data_dir data/dataset
 ```
 
-**Step 3 — Compare all models (accuracy + size + latency on 100 images)**
+**Step 3 — Compare models (accuracy + size + latency)**
 ```bash
+# Single model
 python onnx_experiments/run_experiments.py \
     --models_dir   onnx_experiments/models \
     --data_dir     data/dataset \
-    --max_val_samples 100 \
+    --models       resnet50 \
+    --max_val_samples 1000 \
+    --latency_runs 100 \
+    --gpu \
+    --warmup 20 \
+    --output onnx_experiments/results.json
+
+# All models at once (omit --models)
+python onnx_experiments/run_experiments.py \
+    --models_dir   onnx_experiments/models \
+    --data_dir     data/dataset \
+    --max_val_samples 1000 \
     --latency_runs 100 \
     --warmup 20 \
     --output onnx_experiments/results.json
 ```
 
-Add `--gpu` to measure latency with `CUDAExecutionProvider`.
+Add `--gpu` to measure latency with `CUDAExecutionProvider`, or `--gpu --trt` for TensorRT EP.
 
 ### Output table (example)
 
@@ -518,10 +542,8 @@ Model                                          Size (MB)  Accuracy (%)   Median 
 ----------------------------------------------  ---------  -------------  -----------  ----------  --------
 resnet50_fp32                                      97.70        94.20          18.40       18.90      21.10
 resnet50_int8                                      24.80        93.50           9.20        9.50      11.30
-resnet50_qat                                       97.70        93.80          19.10       19.40      21.80
 vit_b_16_fp32                                     329.60        95.10          82.30       83.10      86.70
 vit_b_16_int8                                      84.10        94.40          41.50       42.20      44.90
-vit_b_16_qat                                      329.60        94.80          84.00       84.50      87.30
 
 Speedup over FP32 baseline (latency):
   resnet50_int8     speedup=2.00x  size_reduction=74.6%  acc_drop=0.70pp
@@ -538,10 +560,13 @@ Speedup over FP32 baseline (latency):
 |---|---|---|
 | `--models_dir` | `onnx_experiments/models` | Folder with `.onnx` files |
 | `--data_dir` | `data/dataset` | Dataset root |
+| `--models` | all | Restrict to these model families (e.g. `resnet50 vit_b_16`) |
+| `--variants` | `fp32 int8` | Which suffixes to include (e.g. `fp32 int8 qat`) |
 | `--max_val_samples` | all | Cap number of validation images |
 | `--latency_runs` | 100 | Inference iterations per model |
 | `--warmup` | 20 | Warm-up iterations (discarded) |
 | `--gpu` | off | Use `CUDAExecutionProvider` |
+| `--trt` | off | Use `TensorrtExecutionProvider` (requires `--gpu` and TensorRT) |
 | `--output` | `onnx_experiments/results.json` | JSON results path |
 
 ### `quantize_onnx.py`
@@ -552,6 +577,7 @@ Speedup over FP32 baseline (latency):
 | `--per_channel` | off | Per-channel weights (more accurate, slower calibration) |
 | `--calibration_method` | `MinMax` | `MinMax`, `Entropy`, or `Percentile` |
 | `--num_calibration_samples` | 256 | Images used to calibrate activations |
+| `--no_symmetric_activation` | off | Switch from S8S8 to S8U8 (asymmetric activations) |
 
 ---
 
@@ -627,6 +653,6 @@ scancel -u $USER
 
 Override any variable at submission time:
 ```bash
-sbatch --export=MODEL=vit_b_16,EPOCHS=5,BATCH_SIZE=64 slurm_train_models.sh
-sbatch --export=MODELS="resnet50 vit_b_16",NUM_CAL_SAMPLES=512 slurm_onnx_experiments.sh
+sbatch --export=ALL,MODEL=vit_b_16,EPOCHS=5,BATCH_SIZE=64 slurm_train_models.sh
+sbatch --export=ALL,"MODELS=resnet50 vit_b_16",NUM_CAL_SAMPLES=512 slurm_onnx_experiments.sh
 ```

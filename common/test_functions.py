@@ -363,6 +363,61 @@ def input_activation_hook(model, data):
     # remove hooks
     for h in hooks:
         h.remove()
+
+    # Fallback: for Quantized_Linear layers whose activation was not captured
+    # (e.g. out_proj in MultiheadAttention called via F.linear bypassing the hook),
+    # use the output of the nearest parent MultiheadAttention as a proxy.
+    import functools
+    import torch.nn as nn
+
+    missed = [
+        (name, m)
+        for name, m in model.named_modules()
+        if isinstance(m, Quantized_Linear)
+        and name not in input_activation
+        and name not in output_activation
+    ]
+
+    if missed:
+        mha_output = {}
+
+        def _record_mha_output(self, x, y, module_name):
+            # MultiheadAttention returns (attn_output, attn_weights); grab attn_output
+            out = y[0] if isinstance(y, tuple) else y
+            mha_output[module_name] = out.detach()
+
+        fallback_hooks = []
+        for name, m in model.named_modules():
+            if isinstance(m, nn.MultiheadAttention):
+                fallback_hooks.append(m.register_forward_hook(
+                    functools.partial(_record_mha_output, module_name=name)))
+
+        model(data)
+
+        for h in fallback_hooks:
+            h.remove()
+
+        # Map each missed layer to its closest parent MHA
+        for layer_name, _ in missed:
+            best_parent = None
+            best_len = -1
+            for mha_name in mha_output:
+                # layer_name should start with mha_name (e.g. "enc.mha.out_proj" vs "enc.mha")
+                if layer_name.startswith(mha_name) and len(mha_name) > best_len:
+                    best_parent = mha_name
+                    best_len = len(mha_name)
+            if best_parent is not None:
+                input_activation[layer_name] = mha_output[best_parent]
+                warnings.warn(
+                    f"Layer '{layer_name}' had no activation captured; "
+                    f"using output of parent MHA '{best_parent}' as proxy for scale calibration."
+                )
+            else:
+                warnings.warn(
+                    f"Skipping activation calibration for layer '{layer_name}': "
+                    "no activation captured and no parent MultiheadAttention found."
+                )
+
     return input_activation, output_activation
 
 def model_to_quant(model, calibration_loader, act_N_bits=8, weight_N_bits=8, method='sym',
@@ -374,9 +429,18 @@ def model_to_quant(model, calibration_loader, act_N_bits=8, weight_N_bits=8, met
         next(iter(calibration_loader))[0].to(device)
     )
 
+    # Identify the very first quantized conv in the model (by iteration order = graph order).
+    # Standard practice: keep the first layer in FP32 to preserve input distribution.
+    # The old check (name != 'conv1') only worked for ResNet; this handles any architecture.
+    first_conv_name = next(
+        (n for n, m in quantized_model.named_modules()
+         if isinstance(m, Quantized_Conv2d)),
+        None
+    )
+
     for name, m in quantized_model.named_modules():
         if isinstance(m, (Quantized_Conv2d, Quantized_Linear)):
-            if name != 'conv1':
+            if name != first_conv_name:
                 if bitwidth_dict is None:
                     m.weight_N_bits = weight_N_bits
                 else:

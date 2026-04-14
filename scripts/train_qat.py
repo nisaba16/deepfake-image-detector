@@ -86,6 +86,10 @@ def main():
     paths, labels, class_to_idx, idx_to_class = collect_image_paths_and_labels(args.data_dir)
     num_classes = len(class_to_idx)
     
+    if args.subsample > 0:
+        paths = paths[:args.subsample]
+        labels = labels[:args.subsample]
+
     # 2. Split with fixed seed
     train_paths, val_paths, train_labels, val_labels = stratified_split(paths, labels, test_size=0.2, seed=args.seed)
     print(f"Train samples: {len(train_paths)}, Val samples: {len(val_paths)}")

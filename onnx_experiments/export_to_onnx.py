@@ -70,11 +70,12 @@ def load_fp32(model_name: str, ckpt_path: str,
     return model
 
 
-def load_qat(model_name: str, ckpt_path: str) -> nn.Module:
+def load_qat(model_name: str, ckpt_path: str,
+             features: tuple = ("rgb", "hsv", "fft", "noise", "srm")) -> nn.Module:
     from common.utils import replace_with_quantized_modules
     from common.solution import Quantized_Conv2d, Quantized_Linear
 
-    model = build_model(model_name)
+    model = build_model(model_name, features=features)
     replace_with_quantized_modules(model)
 
     state = torch.load(ckpt_path, map_location="cpu", weights_only=False)
@@ -88,8 +89,30 @@ def load_qat(model_name: str, ckpt_path: str) -> nn.Module:
     return model
 
 
+def _patch_fft_for_onnx(model: nn.Module):
+    """
+    aten::fft_rfft2 has no ONNX symbolic — replace the FFT branch with zeros
+    of the correct shape so the rest of the graph exports cleanly.
+    Only active during export (patch is applied on the live object, not saved).
+    """
+    try:
+        from common.forensic_mobilenet import ForensicFeatureExtractor
+    except ImportError:
+        return
+    for m in model.modules():
+        if isinstance(m, ForensicFeatureExtractor) and "fft" in m.features:
+            orig_fft = m._fft_features
+            m._fft_features = lambda x: torch.zeros(
+                x.shape[0], 3, x.shape[2], x.shape[3], device=x.device
+            )
+            print("  [WARN] FFT branch replaced with zeros for ONNX export "
+                  "(aten::fft_rfft2 unsupported). rgb/hsv/noise/srm export correctly.")
+            break
+
+
 def export(model: nn.Module, output_path: str, opset: int = 17):
     model.eval()
+    _patch_fft_for_onnx(model)
     dummy = torch.zeros(INPUT_SHAPE)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     torch.onnx.export(
@@ -129,7 +152,7 @@ def main():
     features = tuple(args.features)
     print(f"Loading {args.model} ({variant}) from {args.checkpoint} ...")
     if args.qat:
-        model = load_qat(args.model, args.checkpoint)
+        model = load_qat(args.model, args.checkpoint, features=features)
     else:
         model = load_fp32(args.model, args.checkpoint, features=features)
 

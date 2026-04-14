@@ -51,13 +51,16 @@ class DeepfakeCalibrationReader(CalibrationDataReader):
         model_path: str,
         num_samples: int = 256,
         seed: int = 42,
+        split: str = "val",
     ):
         paths, labels, _, _ = collect_image_paths_and_labels(data_dir)
-        _, val_paths, _, _ = stratified_split(paths, labels, test_size=0.2, seed=seed)
+        train_paths, val_paths, _, _ = stratified_split(paths, labels, test_size=0.2, seed=seed)
 
-        # Subsample uniformly from the validation set
-        step = max(1, len(val_paths) // num_samples)
-        self._paths = val_paths[::step][:num_samples]
+        pool = train_paths if split == "train" else val_paths
+
+        # Subsample uniformly from the chosen split
+        step = max(1, len(pool) // num_samples)
+        self._paths = pool[::step][:num_samples]
 
         session = onnxruntime.InferenceSession(model_path)
         self._input_name = session.get_inputs()[0].name

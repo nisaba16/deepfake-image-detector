@@ -62,15 +62,36 @@ def preprocess(img_path: str, size: int = 224) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Inference helpers
 # ---------------------------------------------------------------------------
-def make_session(model_path: str, use_gpu: bool = False) -> ort.InferenceSession:
-    providers = (
-        ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        if use_gpu
-        else ["CPUExecutionProvider"]
-    )
+def make_session(model_path: str, use_gpu: bool = False,
+                 use_trt: bool = False) -> ort.InferenceSession:
+    if use_trt and use_gpu:
+        providers = [
+            ("TensorrtExecutionProvider", {
+                "trt_engine_cache_enable": True,
+                "trt_engine_cache_path": ".trt_cache",
+                "trt_fp16_enable": False,   # keep FP32 accuracy for benchmarking
+                "trt_int8_enable": False,    # INT8 handled by QDQ nodes in the ONNX graph
+            }),
+            "CUDAExecutionProvider",
+            "CPUExecutionProvider",
+        ]
+    elif use_gpu:
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    else:
+        providers = ["CPUExecutionProvider"]
+
     opts = ort.SessionOptions()
     opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    return ort.InferenceSession(model_path, sess_options=opts, providers=providers)
+    opts.intra_op_num_threads = 4
+    opts.inter_op_num_threads = 1
+    session = ort.InferenceSession(model_path, sess_options=opts, providers=providers)
+
+    active = session.get_providers()[0]
+    print(f"  [ORT] Active provider: {active}")
+    if use_gpu and "CPU" in active:
+        print(f"  [ORT] WARNING: requested GPU but got CPU — "
+              f"check onnxruntime-gpu install and CUDA availability")
+    return session
 
 
 def run_accuracy(
@@ -87,7 +108,11 @@ def run_accuracy(
 
     correct = 0
     errors  = 0
-    for path, label in zip(paths, labels):
+    n_total = len(paths)
+    for i, (path, label) in enumerate(zip(paths, labels)):
+        if i > 0 and i % 100 == 0:
+            print(f"    [{i}/{n_total}] acc so far: "
+                  f"{correct/(i - errors)*100:.1f}%", flush=True)
         try:
             inp  = preprocess(path)
             logits = session.run([output_name], {input_name: inp})[0][0]  # (num_classes,)
@@ -144,7 +169,10 @@ def run_all(
     warmup: int,
     latency_runs: int,
     use_gpu: bool,
+    use_trt: bool,
     seed: int,
+    model_families: Optional[List[str]] = None,
+    variants: Optional[List[str]] = None,
 ) -> List[Dict]:
     # Build validation split once
     print(f"Loading dataset from {data_dir} ...")
@@ -152,7 +180,23 @@ def run_all(
     _, val_paths, _, val_labels = stratified_split(paths, labels, test_size=0.2, seed=seed)
     print(f"  Validation set: {len(val_paths)} images | classes: {class_to_idx}")
 
-    onnx_files = sorted(Path(models_dir).glob("*.onnx"))
+    all_onnx = sorted(Path(models_dir).glob("*.onnx"))
+
+    onnx_files = all_onnx
+    if model_families:
+        # Keep only files whose stem starts with one of the requested family names.
+        # e.g. family "resnet50" matches resnet50_fp32.onnx, resnet50_int8.onnx
+        onnx_files = [p for p in onnx_files
+                      if any(p.stem.startswith(f) for f in model_families)]
+        print(f"  Filtering to families: {model_families} "
+              f"({len(onnx_files)}/{len(all_onnx)} files)")
+    if variants:
+        # Keep only files whose stem ends with one of the requested variant suffixes.
+        # e.g. variants ["fp32", "int8"] excludes *_qat.onnx
+        onnx_files = [p for p in onnx_files
+                      if any(p.stem.endswith(f"_{v}") for v in variants)]
+        print(f"  Filtering to variants: {variants} ({len(onnx_files)} files)")
+
     if not onnx_files:
         print(f"No .onnx files found in {models_dir}")
         return []
@@ -170,7 +214,7 @@ def run_all(
         print(f"{'='*60}")
 
         try:
-            session = make_session(model_path, use_gpu=use_gpu)
+            session = make_session(model_path, use_gpu=use_gpu, use_trt=use_trt)
         except Exception as e:
             print(f"  [ERROR] Failed to load session: {e}")
             results.append({"model": name, "size_mb": size, "error": str(e)})
@@ -208,9 +252,12 @@ def print_table(results: List[Dict]):
         ("P95 (ms)",        "latency_p95_ms",       "10.2f"),
     ]
 
-    header = "  ".join(f"{h:<{fmt[:-1]}}" for h, _, fmt in
-                        [(h, k, f) for h, k, f in cols])
-    sep    = "  ".join("-" * int(f[:-1]) for _, _, f in cols)
+    def _col_width(fmt: str) -> int:
+        # Format spec is either "Ns" or "N.Mf" — extract the leading integer width.
+        return int(fmt.split(".")[0].rstrip("sfgdeE"))
+
+    header = "  ".join(f"{h:<{_col_width(fmt)}}" for h, _, fmt in cols)
+    sep    = "  ".join("-" * _col_width(f) for _, _, f in cols)
     print("\n" + "=" * len(sep))
     print("EXPERIMENT RESULTS")
     print("=" * len(sep))
@@ -262,7 +309,17 @@ def main():
                         help="Latency measurement iterations")
     parser.add_argument("--gpu", action="store_true",
                         help="Use CUDAExecutionProvider for latency")
+    parser.add_argument("--trt", action="store_true",
+                        help="Use TensorrtExecutionProvider (requires --gpu and TensorRT install)")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--models", nargs="+", default=None,
+                        help="Restrict evaluation to these model families "
+                             "(e.g. --models resnet50 vit_b_16). "
+                             "Default: evaluate all .onnx files in models_dir.")
+    parser.add_argument("--variants", nargs="+", default=["fp32", "int8"],
+                        help="Which variants to compare by stem suffix "
+                             "(e.g. --variants fp32 int8 qat). "
+                             "Default: fp32 int8 (excludes qat float-sim graphs).")
     args = parser.parse_args()
 
     results = run_all(
@@ -272,7 +329,10 @@ def main():
         warmup=args.warmup,
         latency_runs=args.latency_runs,
         use_gpu=args.gpu,
+        use_trt=args.trt,
         seed=args.seed,
+        model_families=args.models,
+        variants=args.variants,
     )
 
     if results:
