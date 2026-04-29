@@ -638,22 +638,6 @@ sbatch --wrap="/home/infres/billy-22/miniconda3/envs/deepfake_env/bin/python \
   --job-name=eval --partition=P100 --gres=gpu:1 --mem=16G
 ```
 
-**Output:**
-```
-===========================================================================
-Checkpoint                                            Acc   Fake   Real
----------------------------------------------------------------------------
-best_forensic_mobilenet_rgb-hsv-fft-noise-srm_fp32  74.20% 68.40% 80.00%
-best_vit_b_16_fp32                                  53.00%  6.20% 99.80%
-best_mobilenet_v3_small_fp32                        50.40%  0.80% 100.00%
-...
-===========================================================================
-```
-
-> **Note on cross-dataset accuracy:** models trained on one deepfake generator often
-> predict "real" for everything on unseen generators (~50% accuracy, 0% fake recall).
-> This is a known domain-generalization problem. The forensic features (FFT, SRM, noise)
-> and `ForensicNoiseAugment` are designed to improve this.
 
 ---
 
