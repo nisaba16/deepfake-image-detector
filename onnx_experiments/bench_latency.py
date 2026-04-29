@@ -1,19 +1,3 @@
-"""
-Latency benchmark for ONNX models using dummy inputs.  No dataset required.
-
-Provider routing (when --gpu --trt):
-  *_fp32.onnx       → CUDA EP (float precision, TRT skipped)
-  *_ptq_int8.onnx   → TensorRT EP with trt_int8_enable=True
-  *_qat_int8.onnx   → TensorRT EP with trt_int8_enable=True
-
-Usage:
-    python onnx_experiments/bench_latency.py \
-        --models_dir onnx_experiments/models \
-        --models     resnet50 mobilenet_v3_small \
-        --gpu --trt \
-        --runs 100 --warmup 20
-"""
-
 import argparse
 import os
 import time

@@ -4,14 +4,6 @@ Export a model to FP32 ONNX, PTQ INT8 ONNX, and QAT INT8 ONNX in one shot.
   {model}_fp32.onnx       — FP32 baseline
   {model}_ptq_int8.onnx   — ORT static INT8 quantization of the FP32 ONNX
   {model}_qat_int8.onnx   — ORT static INT8 quantization of the QAT checkpoint
-
-Usage:
-    python onnx_experiments/export.py \
-        --model      resnet50 \
-        --fp32_ckpt  checkpoints/best_resnet50_fp32.pth \
-        --qat_ckpt   checkpoints/best_resnet50_qat.pth \
-        --data_dir   data/dataset \
-        --output_dir onnx_experiments/models
 """
 
 import argparse
@@ -23,13 +15,15 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from onnx_experiments.export_to_onnx import load_fp32, load_qat, export as onnx_export
 
-# ViT / DINOv2 use dynamic quantization (no calibration data, per-batch scales).
-# All CNN models use static QDQ S8S8.
-DYNAMIC_QUANT_MODELS = {"vit_b_16", "dinov2_vitb14"}
+# DINOv2 only: static QDQ calibration fails (symbolic shape inference unsupported).
+# ViT moved to static QDQ for TRT compatibility — dynamic uses DynamicQuantizeLinear
+# + MatMulInteger which TRT does not support.
+DYNAMIC_QUANT_MODELS = {"dinov2_vitb14"}
 
 
 def _quantize(input_onnx: str, output_onnx: str, data_dir: str,
-              dynamic: bool = False, num_cal_samples: int = 256):
+              dynamic: bool = False, num_cal_samples: int = 256,
+              nodes_to_exclude: list = None, no_symmetric_activation: bool = False):
     """Call quantize_onnx.py as a subprocess so its NaN-patch + pre-process logic runs cleanly."""
     cmd = [sys.executable, "onnx_experiments/quantize_onnx.py",
            "--input",  input_onnx,
@@ -39,8 +33,11 @@ def _quantize(input_onnx: str, output_onnx: str, data_dir: str,
     else:
         cmd += ["--data_dir", data_dir,
                 "--num_calibration_samples", str(num_cal_samples),
-                "--quant_format", "QDQ",
-                "--per_channel"]
+                "--quant_format", "QDQ"]
+    if nodes_to_exclude:
+        cmd += ["--nodes_to_exclude"] + nodes_to_exclude
+    if no_symmetric_activation:
+        cmd += ["--no_symmetric_activation"]
     subprocess.run(cmd, check=True)
 
 
@@ -62,6 +59,13 @@ def main():
     parser.add_argument("--num_cal_samples", type=int, default=256,
                         help="Calibration images for static quantization")
     parser.add_argument("--opset", type=int, default=17)
+    parser.add_argument("--nodes_to_exclude", nargs="+", default=[],
+                        help="ONNX node names to exclude from INT8 quantization (kept FP32). "
+                             "E.g. --nodes_to_exclude /conv1/Conv /maxpool/MaxPool")
+    parser.add_argument("--no_symmetric_activation", action="store_true",
+                        help="Use asymmetric activation quantization (S8U8 instead of S8S8). "
+                             "Required for models with Sigmoid/SE blocks (e.g. MobileNetV3) "
+                             "where symmetric quant wastes half the range on never-occurring negatives.")
     args = parser.parse_args()
 
     out = Path(args.output_dir)
@@ -84,7 +88,9 @@ def main():
     # ── 2. PTQ INT8: quantize the FP32 ONNX ──────────────────────────────────
     print(f"\n[2/3] PTQ INT8 → {ptq_onnx}")
     _quantize(fp32_onnx, ptq_onnx, args.data_dir,
-              dynamic=dynamic, num_cal_samples=args.num_cal_samples)
+              dynamic=dynamic, num_cal_samples=args.num_cal_samples,
+              nodes_to_exclude=args.nodes_to_exclude,
+              no_symmetric_activation=args.no_symmetric_activation)
 
     # ── 3. QAT INT8: export QAT checkpoint then quantize ─────────────────────
     if skip_qat:
@@ -94,7 +100,9 @@ def main():
         model = load_qat(args.model, args.qat_ckpt, features=features)
         onnx_export(model, qat_tmp, opset=args.opset)
         _quantize(qat_tmp, qat_onnx, args.data_dir,
-                  dynamic=dynamic, num_cal_samples=args.num_cal_samples)
+                  dynamic=dynamic, num_cal_samples=args.num_cal_samples,
+                  nodes_to_exclude=args.nodes_to_exclude,
+                  no_symmetric_activation=args.no_symmetric_activation)
         Path(qat_tmp).unlink(missing_ok=True)
 
     print(f"\n── Exported to {args.output_dir}/ ──")

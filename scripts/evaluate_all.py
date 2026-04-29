@@ -23,10 +23,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.data_loader import collect_image_paths_and_labels
 from common.forensic_mobilenet import ForensicMobileNetV3, AVAILABLE_FEATURES
 
-
-# ---------------------------------------------------------------------------
-# Dataset
-# ---------------------------------------------------------------------------
 TRANSFORM = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
@@ -41,9 +37,6 @@ class SimpleDataset(Dataset):
         return TRANSFORM(Image.open(self.paths[idx]).convert("RGB")), self.labels[idx]
 
 
-# ---------------------------------------------------------------------------
-# Model builders
-# ---------------------------------------------------------------------------
 def build_resnet50(num_classes):
     m = models.resnet50(weights=None)
     m.fc = nn.Linear(m.fc.in_features, num_classes)
@@ -122,7 +115,7 @@ def load_checkpoint(ckpt_path, num_classes, device):
 
 # ---------------------------------------------------------------------------
 # Evaluation
-# ---------------------------------------------------------------------------
+
 @torch.no_grad()
 def evaluate(model, loader, device):
     correct, total = 0, 0
@@ -149,7 +142,7 @@ def evaluate(model, loader, device):
 
 # ---------------------------------------------------------------------------
 # Main
-# ---------------------------------------------------------------------------
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir",        default="data/ddata/test")

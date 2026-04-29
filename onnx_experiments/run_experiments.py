@@ -10,12 +10,6 @@ Metrics:
   - Accuracy   (Top-1 on validation split)
   - Model size (MB)
   - Latency    (ms/image, median over N warm runs, batch_size=1)
-
-Usage:
-    python onnx_experiments/run_experiments.py \
-        --models_dir onnx_experiments/models \
-        --data_dir   data/dataset \
-        --output     onnx_experiments/results.json
 """
 
 import argparse

@@ -1,17 +1,3 @@
-"""
-Accuracy benchmark for ONNX models on the validation split of the dataset.
-
-Runs on CPU by default (accuracy does not depend on the execution provider).
-Pass --gpu to use CUDAExecutionProvider if you want faster throughput.
-
-Usage:
-    python onnx_experiments/bench_accuracy.py \
-        --models_dir onnx_experiments/models \
-        --data_dir   data/dataset \
-        --models     resnet50 mobilenet_v3_small \
-        --max_samples 1000
-"""
-
 import argparse
 import os
 import sys

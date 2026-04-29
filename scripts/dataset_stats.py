@@ -1,20 +1,5 @@
 """
 Dataset statistics for training and OOD evaluation splits.
-
-Covers:
-  - data/dataset/          (training data)
-  - data/ddata/train/      (ddata train)
-  - data/ddata/test/       (out-of-domain test)
-
-Per split reports:
-  - Total images and per-class counts
-  - Class balance ratio and imbalance warning
-  - Resolution distribution (min / max / mean / p5 / p95) — sampled for speed
-  - File format breakdown
-
-Usage:
-    python scripts/dataset_stats.py
-    python scripts/dataset_stats.py --data_root data --sample 2000 --plot
 """
 
 import argparse

@@ -1,31 +1,3 @@
-"""
-Accuracy comparison: FP32 vs PTQ INT8 (from FP32) vs QAT→INT8 (from QAT pipeline).
-
-For each model:
-  fp32        : {models_dir}/{model}_fp32.onnx           (must exist, pre-built)
-  ptq_int8    : {models_dir}/{model}_ptq_int8.onnx       (built here via ORT PTQ on fp32)
-  qat_int8    : {models_dir}/{model}_int8.onnx           (optional, pre-built from QAT pipeline)
-
-Only measures accuracy — run run_experiments.py for latency benchmarks.
-
-Default quantization scheme: U8S8 (asymmetric activations, signed weights).
-U8S8 works better than S8S8 for ReLU / hard-swish activations because the
-activation distribution is non-negative — asymmetric quantization uses all
-256 INT8 levels efficiently, while symmetric wastes half the range.
-
-Usage:
-    python onnx_experiments/compare_quant.py \\
-        --models mobilenet_v3_small resnet50 \\
-        --models_dir onnx_experiments/models \\
-        --data_dir   data/dataset
-
-    # More calibration samples (better accuracy, slower):
-    python onnx_experiments/compare_quant.py --num_cal_samples 1024
-
-    # Entropy calibration (good for models with outlier activations like ViT):
-    python onnx_experiments/compare_quant.py --calibration_method Entropy
-"""
-
 import argparse
 import json
 import os

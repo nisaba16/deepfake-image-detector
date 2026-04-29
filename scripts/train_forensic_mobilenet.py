@@ -14,7 +14,7 @@ python scripts/train_forensic_mobilenet.py --features rgb hsv
 # RGB + HSV + FFT (frequency artifacts)
 python scripts/train_forensic_mobilenet.py --features rgb hsv fft
 
-# RGB + noise residual + SRM filters
+# RGB + noise residual + SRM filters+HSV + FFT
 python scripts/train_forensic_mobilenet.py --features rgb noise srm
 
 # All five modalities
@@ -62,9 +62,6 @@ class ImageDataset(Dataset):
         return img, label
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 def set_seed(seed: int):
     random.seed(seed)
     torch.manual_seed(seed)
@@ -84,7 +81,6 @@ def checkpoint_name(features, save_dir: str) -> str:
 
 # ---------------------------------------------------------------------------
 # Training / validation one epoch
-# ---------------------------------------------------------------------------
 def run_epoch(model, loader, criterion, optimizer, device, desc: str):
     training = optimizer is not None
     model.train() if training else model.eval()
@@ -120,9 +116,6 @@ def run_epoch(model, loader, criterion, optimizer, device, desc: str):
     return total_loss / len(loader), correct / total
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(description="Train ForensicMobileNetV3 in FP32")
 

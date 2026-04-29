@@ -1,16 +1,3 @@
-"""
-Export PyTorch checkpoints to ONNX format.
-
-Usage:
-    # FP32 export
-    python onnx_experiments/export_to_onnx.py --model resnet50 --checkpoint checkpoints/best_resnet50_fp32.pth
-    python onnx_experiments/export_to_onnx.py --model vit_b_16  --checkpoint checkpoints/best_vit_b_16_fp32.pth
-
-    # QAT export (float graph with simulated quantization baked in)
-    python onnx_experiments/export_to_onnx.py --model resnet50 --checkpoint checkpoints/best_resnet50_qat.pth --qat
-    python onnx_experiments/export_to_onnx.py --model vit_b_16  --checkpoint checkpoints/best_vit_b_16_qat.pth  --qat
-"""
-
 import argparse
 import os
 import sys

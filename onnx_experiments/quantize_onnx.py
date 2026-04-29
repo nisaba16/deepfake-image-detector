@@ -1,31 +1,3 @@
-"""
-Apply onnxruntime static INT8 quantization (S8S8 QDQ) to an ONNX model.
-
-Intended use: quantize a QAT-trained ONNX model to produce a true INT8 graph
-for comparison against an FP32 baseline.
-
-  resnet50_fp32.onnx            ← FP32 baseline, no quantization
-  resnet50_qat.onnx  ──► ORT quantize_static (S8S8 QDQ) ──► resnet50_qat_int8.onnx
-
-S8S8 means: signed INT8 for both weights AND activations (symmetric, zero_point=0).
-This is achieved via:
-  - weight_type=QInt8, activation_type=QInt8
-  - extra_options={"ActivationSymmetric": True}  ← required for zero_point=0 on activations
-
-Usage:
-    # QAT model → INT8 (default S8S8 QDQ):
-    python onnx_experiments/quantize_onnx.py \
-        --input  onnx_experiments/models/resnet50_qat.onnx \
-        --output onnx_experiments/models/resnet50_qat_int8.onnx \
-        --data_dir data/dataset
-
-    # ViT:
-    python onnx_experiments/quantize_onnx.py \
-        --input  onnx_experiments/models/vit_b_16_qat.onnx \
-        --output onnx_experiments/models/vit_b_16_qat_int8.onnx \
-        --data_dir data/dataset --per_channel
-"""
-
 import argparse
 import os
 import sys
@@ -126,6 +98,10 @@ def main():
                              "Recommended for transformer models (ViT, DINOv2): "
                              "activation scales are computed per-batch at runtime, "
                              "no calibration data needed, usually more accurate for transformers.")
+    parser.add_argument("--nodes_to_exclude", nargs="+", default=[],
+                        help="ONNX node names to exclude from quantization (kept as FP32). "
+                             "Useful for TRT-incompatible layers, e.g. ResNet50 stem: "
+                             "/conv1/Conv /maxpool/MaxPool")
     args = parser.parse_args()
 
     # Dynamic quantization path — for transformer models (ViT, DINOv2).
@@ -241,6 +217,8 @@ def main():
         )
         if op_types is not None:
             kwargs["op_types_to_quantize"] = op_types
+        if args.nodes_to_exclude:
+            kwargs["nodes_to_exclude"] = args.nodes_to_exclude
         # Suppress warnings that are expected consequences of NaN values in the
         # preprocessing subgraph (FFT replaced with zeros → NaN activations):
         #   - calibrate.py: "All-NaN axis encountered" from np.nanmin/nanmax

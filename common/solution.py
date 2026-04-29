@@ -133,7 +133,7 @@ def reset_scale_and_zero_point(input: torch.tensor, N_bits: int = 4, method: str
             # Symmetric: clip at max absolute value, zero_point = 0
             max_val = input.abs().max()
             q_max = 2 ** (N_bits - 1) - 1
-            step_size = max_val / q_max
+            step_size = torch.clamp(max_val / q_max, min=1e-8)
             zero_point = torch.tensor(0.)
 
         elif method == 'asym':
@@ -334,4 +334,5 @@ def reset_scale_unsigned(input: torch.tensor, N_bits: int = 4):
     with torch.no_grad():
         zero_point = torch.tensor(0.)
         step_size = torch.max(torch.abs(input)) / ((2**(N_bits))-1)
+        step_size = torch.clamp(step_size, min=1e-8)
     return step_size, zero_point

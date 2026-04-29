@@ -467,9 +467,9 @@ TensorRT INT8 engine is used automatically for `*_int8` models when `--trt` is s
 **`export.py`** — one command exports all three variants for a model:
 ```bash
 python onnx_experiments/export.py \
-    --model      resnet50 \
-    --fp32_ckpt  checkpoints/best_resnet50_fp32.pth \
-    --qat_ckpt   checkpoints/best_resnet50_qat.pth \
+    --model      mobilenet_v3_small \
+    --fp32_ckpt  checkpoints/best_mobilenet_v3_small_fp32.pth \
+    --qat_ckpt   checkpoints/best_mobilenet_v3_small_qat.pth \
     --data_dir   data/dataset \
     --output_dir onnx_experiments/models
 # → resnet50_fp32.onnx  resnet50_ptq_int8.onnx  resnet50_qat_int8.onnx
@@ -479,7 +479,19 @@ python onnx_experiments/export.py \
 ```bash
 python onnx_experiments/bench_latency.py \
     --models_dir onnx_experiments/models \
-    --models     resnet50 mobilenet_v3_small \
+    --models mobilenet_v3_small \
+    --gpu --trt \
+    --runs 100 --warmup 20
+
+python onnx_experiments/bench_latency.py \
+    --models_dir onnx_experiments/models \
+    --models resnet50 \
+    --gpu --trt \
+    --runs 100 --warmup 20
+
+python onnx_experiments/bench_latency.py \
+    --models_dir onnx_experiments/models \
+    --models vit_b_16 \
     --gpu --trt \
     --runs 100 --warmup 20
 # FP32 models → CUDA EP (float)
