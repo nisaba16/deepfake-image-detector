@@ -5,6 +5,10 @@ Binary deepfake classification toolkit with a full experiment pipeline:
 
 Supported models: `resnet50`, `vit_b_16`, `mobilenet_v3_small`, `dinov2_vitb14`, `forensic_mobilenet`
 
+> **Website models:** the lightweight detectors served by `deepfake-detection-38502` (SAFE, PE-Core, DINOv3,
+> fusion) are trained and exported with [`webdet/`](webdet/README.md), which also explains why the models below
+> do not generalize beyond their training set.
+
 ---
 
 ## Project Structure
